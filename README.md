@@ -50,8 +50,7 @@ python train.py --config configs/schedule25000/${DATA}_25000.txt --render_path 0
 
 We provide the trained model:
 
-<div align="center">
-<table width="600">
+<table>
 <tr>
     <th rowspan="2">scene</th>
     <th colspan="2">PSNR</th>
@@ -107,7 +106,6 @@ We provide the trained model:
 </tr>
 
 </table>
-</div>
 
 ## Rendering and Generating Spirals
 The following command will generate 120 novel view videos, or you can set the render_path as 1 in the above training command.
