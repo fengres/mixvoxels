@@ -13,7 +13,7 @@ especially for many daily dynamic scenes dominated by the static background.
 As a result, with 15 minutes of training for dynamic scenes with inputs of 300-frame videos, MixVoxels achieves better PSNR than previous methods.
 
 <div align="center">
-<img src="resources/mixvoxels.png" width="450" align="center"/>
+<img src="tools/mixvoxels.png" width="450" align="center"/>
 </div>
 
 ## Installation
