@@ -1,0 +1,79 @@
+# base: coffe_logcons_t01_95_star_cosine_tv3_dg_point_wise5_smoothk41_noreg_l2_ddr12_bigstep2_supersmall_300_latent256.txt
+# high motion quality set latent featureC = 512
+scene_box = [-3.0, -3.0, -1.5]
+time_head = directdyrender
+dy_loss = l2
+dynamic_pool_kernel_size = 41
+dynamic_granularity = point_wise
+point_wise_dynamic_threshold = 0.01
+use_cosine_lr_scheduler = 1
+lr_init = 0.02
+lr_basis = 3e-3
+lr_dynamic_init = 0.02
+lr_dynamic_basis = 3e-3
+frame_start = 670
+
+n_iters = 12500
+N_voxel_final = 262144000
+featureC = 512
+featureD = 512
+upsamp_list = [1000,1500,2000,2750]
+update_AlphaMask_list = [1250]
+
+dataset_name = llffvideo
+datadir = ../data/flame_salmon/
+basedir = ./log
+
+downsample_train = 2.0
+ndc_ray = 1
+
+batch_size = 512
+batch_factor = [8,8,2,1]
+data_dim_color = 27
+data_dim_density = 27
+n_time_embedding = 150
+step_ratio = 4
+
+zero_dynamic_sigma = 1
+zero_dynamic_sigma_thresh = 0.00001
+
+sigma_static_thresh = 0.1
+
+sigma_diff_method = 'log'
+sigma_diff_weight = 0.0
+sigma_diff_log_thresh = 0.1
+
+rgb_diff_weight = 0.0
+rgb_diff_log_thresh = 0.2
+
+loss_weight_static = 1
+dynamic_reg_weight = 0.1
+temporal_variance_threshold = 0.03
+dynamic_threshold = 0.9
+rm_weight_mask_thre = 0.0001
+rm_weight_mask_thre_static = 0.00001
+n_train_frames = 300
+n_frames = 300
+alpha_mask_thre = 0.00001
+
+N_voxel_init =  32768000 # 320**3
+
+N_vis = -1 # vis all testing images
+vis_every = 100000
+
+render_test = 1
+render_path = 1
+
+n_lamb_sigma = [16,4,4]
+n_lamb_sh = [48,12,12]
+
+shadingMode = MLP_Fea
+fea2denseAct = relu
+
+view_pe = 0
+fea_pe = 0
+
+TV_weight_density = 1.0
+TV_weight_app = 1.0
+TV_dynamic_factor = 3.0
+
