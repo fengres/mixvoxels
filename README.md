@@ -47,6 +47,8 @@ python train.py --config configs/schedule12500/${DATA}_12500.txt --render_path 0
 # MixVoxels-L
 python train.py --config configs/schedule25000/${DATA}_25000.txt --render_path 0
 ```
+Please note that in your first running, the above command will first pre-process the dataset, including resizing the frames by a factor of 2 (to 1K resolution which is a standard),
+as well as calculating the std of each video and save them into your disk. The pre-processing will cost about 2 hours, but is only required at the first running. After the pre-processing, the command will automatically train your scenes.
 
 We provide the trained model:
 
