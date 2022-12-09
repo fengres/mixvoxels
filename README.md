@@ -119,11 +119,16 @@ python tools/make_spiral.py --video_path log/your_config/img_path_all/ --target 
 ```
 
 
-[//]: # (## Citation)
-[//]: # (If you find our code or paper helps, please consider citing:)
-[//]: # (```)
-[//]: #
-[//]: # (```)
+## Citation
+If you find our code or paper helps, please consider citing:
+```
+@article{wang2022mixed,
+  title={Mixed Neural Voxels for Fast Multi-view Video Synthesis},
+  author={Wang, Feng and Tan, Sinan and Li, Xinghang and Tian, Zeyue and Liu, Huaping},
+  journal={arXiv preprint arXiv:2212.00190},
+  year={2022}
+}
+```
 
 ## Acknowledge
 The codes are based on [TensoRF](https://github.com/apchenstu/TensoRF), many thanks to the authors. 
