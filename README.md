@@ -115,7 +115,7 @@ python train.py --config your_config --render_only 1 --render_path 1 --ckpt log/
 ```
 Generating spirals:
 ```
-python tools/make_spiral.py --video_path log/your_config/img_path_all/ --target log/your_config/spirals --target_video log/your_config/spirals.mp4
+python tools/make_spiral.py --videos_path log/your_config/imgs_path_all/ --target log/your_config/spirals --target_video log/your_config/spirals.mp4
 ```
 
 
