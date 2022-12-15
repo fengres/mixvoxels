@@ -80,20 +80,25 @@ def render_test(args):
                                     rayMarch_weight_thres_static=args.rm_weight_mask_thre_static,
                                     pos_pe=args.pos_pe, view_pe=args.view_pe, fea_pe=args.fea_pe,
                                     featureC=args.featureC, step_ratio=kwargs['step_ratio'], fea2denseAct=args.fea2denseAct,
-                                    den_dim=args.data_dim_density, featureD=args.featureD,
-                                    n_frames=args.n_frames,
+                                    den_dim=args.data_dim_density, densityMode=args.densityMode, featureD=args.featureD,
+                                    rel_pos_pe=args.rel_pos_pe, n_frames=args.n_frames,
                                     amp=args.amp, temporal_variance_threshold=args.temporal_variance_threshold,
-                                    dynamic_threshold=args.dynamic_threshold,
+                                    n_frame_for_static=args.n_frame_for_static,
+                                    dynamic_threshold=args.dynamic_threshold, n_time_embedding=args.n_time_embedding,
+                                    static_dynamic_seperate=args.static_dynamic_seperate,
                                     zero_dynamic_sigma=args.zero_dynamic_sigma,
                                     zero_dynamic_sigma_thresh=args.zero_dynamic_sigma_thresh,
                                     sigma_static_thresh=args.sigma_static_thresh,
                                     n_train_frames=args.n_train_frames,
+                                    net_layer_add=args.net_layer_add,
                                     density_n_comp_dynamic=args.n_lamb_sigma_dynamic,
                                     app_n_comp_dynamic=args.n_lamb_sh_dynamic,
                                     interpolation=args.interpolation,
+                                    dynamic_granularity=args.dynamic_granularity,
                                     point_wise_dynamic_threshold=args.point_wise_dynamic_threshold,
+                                    static_point_detach=args.static_point_detach,
                                     dynamic_pool_kernel_size=args.dynamic_pool_kernel_size,
-                                    time_head=args.time_head,
+                                    time_head=args.time_head, filter_thresh=args.filter_threshold,
                                     static_featureC=args.static_featureC,
                                     )
     tensorf.load(ckpt)
@@ -137,7 +142,7 @@ def render_test(args):
                                 start_idx=args.render_path_start)
 
 def train_dynamics(args, tensorf, allrays, allrgbs, allstds, ndc_ray, nSamples, scaler, device, iter_ratio=1):
-    DynamicCriterion = Dynamics(args, device)
+    DynamicCriterion = Dynamics(args, device, use_volumetric_render=args.dynamic_use_volumetric_render)
     dy_optimizer = torch.optim.Adam(tensorf.get_dynamic_optparam_groups(args.lr_init), betas=(0.9, 0.99))
     dy_lr_factor = args.lr_decay_target_ratio ** (1 / (args.n_dynamic_iters*iter_ratio))
     pbar_dynamic = tqdm(range(args.n_dynamic_iters*iter_ratio), miniters=args.progress_refresh_rate, file=sys.stdout)
@@ -178,7 +183,7 @@ def train_dynamics(args, tensorf, allrays, allrgbs, allstds, ndc_ray, nSamples, 
 # evaluation
 @torch.no_grad()
 def eval_dynamics(args, tensorf, test_dataset, ndc_ray, nSamples, device):
-    DynamicCriterion = Dynamics(args, device)
+    DynamicCriterion = Dynamics(args, device, use_volumetric_render=args.dynamic_use_volumetric_render)
     for idx, samples in tqdm(enumerate(test_dataset.all_rays), file=sys.stdout):
         rays_test = samples.reshape(-1, samples.shape[-1]).to(device).contiguous()
         rgb_test = test_dataset.all_rgbs[idx].reshape(-1, args.n_frames, 3).to(device).contiguous()
@@ -262,11 +267,15 @@ def reconstruction(args):
                        'amp': args.amp,
                        'temporal_variance_threshold': args.temporal_variance_threshold,
                        'dynamic_threshold': args.dynamic_threshold,
+                       'n_time_embedding': args.n_time_embedding,
+                       'static_dynamic_seperate': args.static_dynamic_seperate,
                        'n_frames': args.n_frames,
+                       'dynamic_use_volumetric_render': args.dynamic_use_volumetric_render,
                        'sigma_static_thresh': args.sigma_static_thresh,
                        'zero_dynamic_sigma': args.zero_dynamic_sigma,
                        'zero_dynamic_sigma_thresh': args.zero_dynamic_sigma_thresh,
                        'n_train_frames': args.n_train_frames,
+                       'net_layer_add': args.net_layer_add,
                        })
         tensorf = eval(args.model_name)(**kwargs)
         tensorf.load(ckpt)
@@ -276,17 +285,21 @@ def reconstruction(args):
                     shadingMode=args.shadingMode, alphaMask_thres=args.alpha_mask_thre, density_shift=args.density_shift, distance_scale=args.distance_scale,
                     rayMarch_weight_thres=args.rm_weight_mask_thre,
                     pos_pe=args.pos_pe, view_pe=args.view_pe, fea_pe=args.fea_pe, featureC=args.featureC, step_ratio=args.step_ratio, fea2denseAct=args.fea2denseAct,
-                    den_dim=args.data_dim_density, featureD=args.featureD, n_frames=args.n_frames,
-                    amp=args.amp, temporal_variance_threshold=args.temporal_variance_threshold,
-                    dynamic_threshold=args.dynamic_threshold,
-                    zero_dynamic_sigma=args.zero_dynamic_sigma,
+                    den_dim=args.data_dim_density, densityMode=args.densityMode, featureD=args.featureD, rel_pos_pe=args.rel_pos_pe, n_frames=args.n_frames,
+                    amp=args.amp, temporal_variance_threshold=args.temporal_variance_threshold, n_frame_for_static=args.n_frame_for_static,
+                    dynamic_threshold=args.dynamic_threshold, n_time_embedding=args.n_time_embedding, static_dynamic_seperate=args.static_dynamic_seperate,
+                    dynamic_use_volumetric_render=args.dynamic_use_volumetric_render, zero_dynamic_sigma=args.zero_dynamic_sigma,
                     zero_dynamic_sigma_thresh=args.zero_dynamic_sigma_thresh, sigma_static_thresh=args.sigma_static_thresh, n_train_frames=args.n_train_frames,
+                    net_layer_add=args.net_layer_add,
                     density_n_comp_dynamic=args.n_lamb_sigma_dynamic,
                     app_n_comp_dynamic=args.n_lamb_sh_dynamic,
                     interpolation=args.interpolation,
+                    dynamic_granularity=args.dynamic_granularity,
                     point_wise_dynamic_threshold=args.point_wise_dynamic_threshold,
+                    static_point_detach=args.static_point_detach,
                     dynamic_pool_kernel_size=args.dynamic_pool_kernel_size,
                     time_head=args.time_head,
+                    filter_thresh=args.filter_threshold,
                     static_featureC=args.static_featureC,
                     )
 
@@ -318,6 +331,7 @@ def reconstruction(args):
                      ).long()
                    ).tolist()[1:]
 
+
     torch.cuda.empty_cache()
     Metrics = {
         'PSNRs': [],
@@ -333,6 +347,7 @@ def reconstruction(args):
         allrays, allrgbs, allstds = tensorf.filtering_rays(allrays, allrgbs, allstds, bbox_only=True)
     current_batch_size = int(args.batch_size * batch_factor[0])
     print("creating sammpler with batch size: {}".format(current_batch_size))
+    assert args.ray_sampler == 'simple'
     print("=================SimpleRay========================")
     print('All Rays: {}'.format(allrays.shape[0]))
     trainingSampler = SimpleSampler(allrays.shape[0], current_batch_size)
@@ -350,12 +365,16 @@ def reconstruction(args):
     # Training Dynamic Volumetric representations
     train_dynamics(args, tensorf, allrays, allrgbs, allstds, ndc_ray, nSamples, scaler, device)
     eval_dynamics(args, tensorf, test_dataset, ndc_ray, nSamples, device)
+    assert args.temporal_sampler == 'simple'
     print("=================SimpleTemporal========================")
     temporal_sampler = TemporalSampler(args.n_frames, args.n_train_frames)
 
+    # debugger = DebugGradient(static_optimizer)
+    # debugger.check()
     pbar = tqdm(range(args.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
     timing = {}
 
+    # tensorf.calc_init_alpha(tuple(reso_cur))
     for iteration in pbar:
         _time = time.time()
         if args.use_cosine_lr_scheduler:
@@ -379,6 +398,11 @@ def reconstruction(args):
                                     std_train=std_train)
             # print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
             retva = Namespace(**retva)
+
+            # =============== dynamics prediction for points ===============
+            # dynamics dynamics_supervision shape: Ns
+            # dynamic_prediction_loss = DynamicCriterion.calculate_loss(dynamics, dynamics_supervision)
+            # DynamicCriterion.compute_metrics()
 
             # ray_wise_temporal_mask [Nr x T]
             total_loss = 0
@@ -450,8 +474,9 @@ def reconstruction(args):
                 if args.TV_dynamic_factor > 0:
                     loss_tv = tensorf.TV_loss_density(tvreg) * TV_weight_density * args.TV_dynamic_factor
                     total_loss = total_loss + loss_tv
-                loss_tv = tensorf.TV_loss_static_density(tvreg) * TV_weight_density
-                total_static_loss = total_static_loss + loss_tv
+                if args.static_dynamic_seperate:
+                    loss_tv = tensorf.TV_loss_static_density(tvreg) * TV_weight_density
+                    total_static_loss = total_static_loss + loss_tv
                 summary_writer.add_scalar('train/reg_tv_density', loss_tv.detach().item(), global_step=iteration)
 
             if TV_weight_app>0 and iteration < args.TV_loss_end_iteration:
@@ -459,8 +484,9 @@ def reconstruction(args):
                 if args.TV_dynamic_factor > 0:
                     loss_tv = tensorf.TV_loss_app(tvreg) * TV_weight_app * args.TV_dynamic_factor
                     total_loss = total_loss + loss_tv
-                loss_tv = tensorf.TV_loss_static_app(tvreg) * TV_weight_app
-                total_static_loss = total_static_loss + loss_tv
+                if args.static_dynamic_seperate:
+                    loss_tv = tensorf.TV_loss_static_app(tvreg) * TV_weight_app
+                    total_static_loss = total_static_loss + loss_tv
                 summary_writer.add_scalar('train/reg_tv_app', loss_tv.detach().item(), global_step=iteration)
 
         time_ = time.time()
@@ -518,6 +544,7 @@ def reconstruction(args):
 
         if iteration % args.vis_every == args.vis_every - 1 and args.N_vis!=0:
             tensorf.save(f'{logfolder}/{args.expname}.th')
+            cuda_empty()
             with autocast(enabled=bool(args.amp)):
                 Metrics['PSNRs_t'], Metrics['PSNRs_st'], all_metrics = evaluation(test_dataset,tensorf, args, renderer, f'{logfolder}/imgs_vis/', N_vis=args.N_vis,
                                     prtx=f'{iteration:06d}_', N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray, compute_extra_metrics=False,
@@ -553,6 +580,15 @@ def reconstruction(args):
         if args.ray_sampler == 'comp' and iteration == args.ray_sampler_shift:
             print('Shifting Training Sampler')
             trainingSampler = WeightedRaySampler(allrays.shape[0], current_batch_size, train_dataset.all_rays_weight)
+
+        if iteration == args.shift_std:
+            print('Shifting STDs')
+            allstds = train_dataset.shift_stds()
+            test_dataset.shift_stds()
+            if iteration not in upsamp_list:
+                train_dynamics(args, tensorf, allrays, allrgbs, allstds, ndc_ray, nSamples, scaler, device, iter_ratio=2)
+                eval_dynamics(args, tensorf, test_dataset, ndc_ray, nSamples, device)
+                cuda_empty()
 
         if iteration in upsamp_list:
             n_voxels = N_voxel_list.pop(0)

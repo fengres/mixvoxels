@@ -4,6 +4,7 @@ import math
 import numpy as np
 from .utils_model import positional_encoding
 
+
 class MLPRender_Fea(torch.nn.Module):
     def __init__(self,inChanel, viewpe=6, feape=6, featureC=128):
         super(MLPRender_Fea, self).__init__()
@@ -27,18 +28,22 @@ class MLPRender_Fea(torch.nn.Module):
         mlp_in = torch.cat(indata, dim=-1)
         rgb = self.mlp(mlp_in)
         rgb = torch.sigmoid(rgb)
+
         return rgb
 
-
 class DirectDyRender(torch.nn.Module):
-    def __init__(self, inChanel, viewpe=6, using_view=False,
+    def __init__(self, inChanel, viewpe=6, using_view=False, n_time_embedding=6,
                  total_time=300, featureD=128, time_embedding_type='abs', net_spec='i-d-d-o', gain=1.0):
         super(DirectDyRender, self).__init__()
 
         self.in_mlpC = inChanel + using_view * (3 + 2*viewpe*3)
         self.viewpe = viewpe
+        self.n_time_embedding = n_time_embedding
         self.time_embedding_type = time_embedding_type
         self.using_view = using_view
+        self.time_pos_encoding = torch.nn.Parameter(
+            0.1 * torch.randn(total_time, n_time_embedding)
+        )
         self.total_time = total_time
 
         self.out_dim = 3*total_time if using_view else total_time

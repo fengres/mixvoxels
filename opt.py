@@ -58,10 +58,12 @@ def config_parser(cmd=None):
     parser.add_argument('--dynamic_only_ray_start_iteration', type=int, default=-1)
     parser.add_argument("--remove_foreground", type=int, default=0, help='remove foreground')
     parser.add_argument('--static_type', type=str, default='mean')
+    parser.add_argument('--static_dynamic_seperate', type=int, default=1)
     parser.add_argument("--dynamic_reg_weight", type=float, default=0)
     parser.add_argument("--sigma_static_thresh", type=float, default=1.0)
     parser.add_argument("--dynamic_granularity", type=str, default='ray_wise', choices=['ray_wise', 'point_wise'])
     parser.add_argument("--point_wise_dynamic_threshold", type=float, default=0.03)
+    parser.add_argument("--static_point_detach", type=int, default=1)
     parser.add_argument("--dynamic_pool_kernel_size", type=int, default=1)
 
     # training options
@@ -86,6 +88,7 @@ def config_parser(cmd=None):
     parser.add_argument("--temporal_variance_threshold", type=float, default=0.01)
     parser.add_argument("--dynamic_threshold", type=float, default=0.9)
     parser.add_argument("--loss_weight_static", type=float, default=1)
+    parser.add_argument("--dynamic_use_volumetric_render", type=int, default=0)
     parser.add_argument("--loss_weight_thresh_start", type=float, default=0.0)
     parser.add_argument("--loss_weight_thresh_end", type=float, default=0.00)
     parser.add_argument("--simple_sample_weight", type=float, default=0)
@@ -99,6 +102,7 @@ def config_parser(cmd=None):
     parser.add_argument("--ray_weight_gamma", type=float, default=1)
 
     parser.add_argument("--filter_loss_weight", type=float, default=0)
+    parser.add_argument("--filter_threshold", type=float, default=1.0)
 
     parser.add_argument("--temporal_sampler_method", type=str, default='mean')
     parser.add_argument("--temporal_sampler", type=str, default='simple')
@@ -115,6 +119,7 @@ def config_parser(cmd=None):
     parser.add_argument("--rgb_diff_weight", type=float, default=0.0)
     parser.add_argument("--rgb_diff_log_thresh", type=float, default=0.02)
 
+    parser.add_argument("--n_frame_for_static", type=int, default=2)
     parser.add_argument("--L1_weight_inital", type=float, default=0.0,
                         help='loss weight')
     parser.add_argument("--L1_weight_rest", type=float, default=0,
@@ -145,7 +150,9 @@ def config_parser(cmd=None):
     parser.add_argument("--interpolation", type=str, default="bilinear")
     # FengADD
     parser.add_argument("--data_dim_density", type=int, default=27)
+    parser.add_argument("--densityMode", type=str, default="None")
     parser.add_argument("--featureD", type=int, default=128, help='hidden feature channel in MLP')
+    parser.add_argument("--net_layer_add", type=int, default=0, help='hidden feature channel in MLP')
     parser.add_argument("--rel_pos_pe", type=int, default=6)
 
     parser.add_argument("--rm_weight_mask_thre", type=float, default=0.0001,

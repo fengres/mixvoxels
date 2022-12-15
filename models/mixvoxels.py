@@ -1,10 +1,13 @@
 import torch
 import torch.nn
 import torch.nn.functional as F
+from .sh import eval_sh_bases
 import numpy as np
 import time
-from .utils_model import static_raw2alpha, raw2alpha, sigma2alpha
+from functools import reduce
 from .timeHead import DirectDyRender, ForrierDyRender, MLPRender_Fea
+from .utils_model import sigma2alpha, raw2alpha, static_raw2alpha
+
 
 class AlphaGridMask(torch.nn.Module):
     def __init__(self, device, aabb, alpha_volume):
@@ -29,40 +32,20 @@ class AlphaGridMask(torch.nn.Module):
 
 class MixVoxels(torch.nn.Module):
     def __init__(self, args, aabb, gridSize, device,
-                    density_n_comp = 8,
-                    appearance_n_comp = 24,
-                    app_dim = 27,
-                    shadingMode = 'MLP_PE',
-                    alphaMask = None,
-                    near_far=[2.0,6.0],
-                    density_shift = -10,
-                    alphaMask_thres=0.001,
-                    distance_scale=25,
-                    rayMarch_weight_thres=0.0001,
+                 density_n_comp = 8, appearance_n_comp = 24, app_dim = 27,
+                    shadingMode = 'MLP_PE', alphaMask = None, near_far=[2.0,6.0],
+                    density_shift = -10, alphaMask_thres=0.001, distance_scale=25, rayMarch_weight_thres=0.0001,
                     rayMarch_weight_thres_static=0.0001,
-                    pos_pe = 6,
-                    view_pe = 6,
-                    fea_pe = 6,
-                    featureC=128,
-                    step_ratio=2.0,
-                    fea2denseAct = 'softplus',
-                    den_dim=None,
-                    featureD=128,
-                    n_frames=300,
-                    amp=False,
-                    temporal_variance_threshold=0.1,
-                    dynamic_threshold=0.9,
-                    zero_dynamic_sigma=0,
-                    zero_dynamic_sigma_thresh=0.001,
-                    sigma_static_thresh=1.,
-                    n_train_frames=0,
-                    density_n_comp_dynamic=0,
-                    app_n_comp_dynamic=0,
-                    interpolation='bilinear',
-                    point_wise_dynamic_threshold=None,
-                    dynamic_pool_kernel_size=1,
-                    time_head='dyrender',
+                    pos_pe = 6, view_pe = 6, fea_pe = 6, featureC=128, step_ratio=2.0,
+                    fea2denseAct = 'softplus', den_dim=None, densityMode=None, featureD=128, rel_pos_pe=6,
+                    n_frames=300, amp=False, temporal_variance_threshold=0.1, n_frame_for_static=2,
+                    dynamic_threshold=0.9, n_time_embedding=24, static_dynamic_seperate=0, dynamic_use_volumetric_render=0,
+                    zero_dynamic_sigma=0, zero_dynamic_sigma_thresh=0.001, sigma_static_thresh=1., n_train_frames=0,
+                    net_layer_add=0, density_n_comp_dynamic=0, app_n_comp_dynamic=0, interpolation='bilinear',
+                    dynamic_granularity=None, point_wise_dynamic_threshold=None, static_point_detach=1,
+                    dynamic_pool_kernel_size=1, time_head='dyrender',
                     # frequency parameters
+                    frequency_threshold=0, filter_thresh=1.0,
                     static_featureC=128,
                  ):
         super(MixVoxels, self).__init__()
@@ -71,6 +54,7 @@ class MixVoxels(torch.nn.Module):
         self.app_n_comp = appearance_n_comp
         self.density_n_comp_dynamic = density_n_comp_dynamic or density_n_comp
         self.app_n_comp_dynamic = app_n_comp_dynamic or appearance_n_comp
+        print(self.density_n_comp_dynamic, self.app_n_comp_dynamic)
         self.app_dim = app_dim
         self.den_dim = den_dim
         self.aabb = aabb
@@ -78,14 +62,23 @@ class MixVoxels(torch.nn.Module):
         self.device=device
         self.amp = amp
         self.n_frames = n_frames
+        self.n_frame_for_static = n_frame_for_static
         self.temporal_variance_threshold = temporal_variance_threshold
         self.dynamic_threshold = dynamic_threshold
         self.point_wise_dynamic_threshold = point_wise_dynamic_threshold
+        self.n_time_embedding = n_time_embedding
+        self.static_dynamic_seperate = static_dynamic_seperate
+        self.dynamic_use_volumetric_render = dynamic_use_volumetric_render
         self.zero_dynamic_sigma = zero_dynamic_sigma
         self.zero_dynamic_sigma_thresh = zero_dynamic_sigma_thresh
         self.sigma_static_thresh = sigma_static_thresh
         self.n_train_frames = n_train_frames
+        self.net_layer_add = net_layer_add
         self.interpolation = interpolation
+        self.dynamic_granularity = dynamic_granularity
+        self.static_point_detach = static_point_detach
+        self.frequency_threshold = frequency_threshold
+        self.filter_thresh = filter_thresh
         self.time_head = time_head
         self.static_featureC = static_featureC
         self.TimeHead = {'directdyrender': DirectDyRender, 'forrier': ForrierDyRender}[time_head]
@@ -109,24 +102,25 @@ class MixVoxels(torch.nn.Module):
 
 
         self.shadingMode, self.pos_pe, self.view_pe, self.fea_pe, self.featureC = shadingMode, pos_pe, view_pe, fea_pe, featureC
+        self.densityMode = None if densityMode == 'None' else densityMode
         self.featureD = featureD
 
         self.init_svd_volume(gridSize[0], device)
 
-        self.init_render_func(view_pe, featureC, device)
-        self.init_render_den_func(featureD, device)
+        self.init_render_func(shadingMode, pos_pe, view_pe, fea_pe, featureC, device)
+        self.init_render_den_func(self.densityMode, rel_pos_pe, featureD, device)
         self.init_static_render_func(device)
 
         self.maxpool1d = torch.nn.MaxPool1d(kernel_size=dynamic_pool_kernel_size, stride=1,
                                             padding=(dynamic_pool_kernel_size-1)//2)
 
-    def init_render_func(self, view_pe, featureC, device):
-        self.renderModule = self.TimeHead(self.app_dim, viewpe=view_pe, using_view=True, featureD=featureC,
+    def init_render_func(self, shadingMode, pos_pe, view_pe, fea_pe, featureC, device):
+        self.renderModule = self.TimeHead(self.app_dim, viewpe=view_pe, using_view=True, n_time_embedding=self.n_time_embedding, featureD=featureC,
                                         total_time=self.n_frames, net_spec=self.args.netspec_dy_color).to(device)
         print(self.renderModule)
 
-    def init_render_den_func(self, featureD, device):
-        self.renderDenModule = self.TimeHead(self.den_dim, viewpe=0, using_view=False, featureD=featureD,
+    def init_render_den_func(self, densityMode, pos_pe, featureD, device):
+        self.renderDenModule = self.TimeHead(self.den_dim, viewpe=0, using_view=False, n_time_embedding=self.n_time_embedding, featureD=featureD,
                                         total_time=self.n_frames, net_spec=self.args.netspec_dy_density).to(device)
         print(self.renderDenModule)
 
@@ -434,6 +428,18 @@ class MixVoxels(torch.nn.Module):
         Nr, ns, nc = xyz_sampled.shape
         dynamic_prediction = self.compute_dynamics(xyz_sampled.reshape((Nr * ns, nc))).reshape(Nr, ns)
         max_dynamic_prediction = dynamic_prediction.max(dim=1)[0]
+        if self.dynamic_use_volumetric_render:
+            static_sigma = torch.zeros(*xyz_sampled.shape[:2], device=xyz_sampled.device, dtype=(torch.float32 if self.amp else torch.float32))
+            if ray_valid.any():
+                # static branch
+                static_sigma_feature = self.compute_static_density(xyz_sampled[ray_valid])
+                valid_static_sigma = self.feature2density(static_sigma_feature)
+                static_sigma[ray_valid] = valid_static_sigma
+            static_alpha, static_weight, static_bg_weight = static_raw2alpha(static_sigma, dists * self.distance_scale)
+            # static_weight Nr x Ns
+
+            dynamic_prediction = torch.sum((static_weight.detach()).softmax(dim=1) * dynamic_prediction, dim=1)
+            # dynamic_prediction[static_weight <= self.rayMarch_weight_thres] = -1e7
         return dynamic_prediction, dynamics_supervision, max_dynamic_prediction
 
     def inference_dynamics(self, xyz_sampled):
@@ -522,8 +528,8 @@ class MixVoxels(torch.nn.Module):
     def forward_seperatly(self, rays_chunk, std_train, white_bg=True, is_train=False, ndc_ray=False, N_samples=-1,
                           rgb_train=None, temporal_indices=None, render_path=False):
 
-        # Ray Marching:
-        #  sampling points along rays, and filter the empty space (with ray_valid) through the alphaGridMask
+        # 1.Ray Marching:
+        #  sampling points along rays, and filter the empty space through the alphaGridMask
         xyz_sampled, z_vals, ray_valid, dists, viewdirs = self.sampling_points(rays_chunk, ndc_ray, is_train, N_samples)
         xyz_sampled = self.normalize_coord(xyz_sampled)
 
@@ -578,16 +584,21 @@ class MixVoxels(torch.nn.Module):
         app_mask = app_mask.any(dim=2) & point_dynamic_mask
         if app_mask.any():
             app_features = self.compute_appfeature(xyz_sampled[app_mask])
-            rgb[app_mask] = self.renderModule(features=app_features, viewdirs=viewdirs[app_mask],
+            valid_rgbs = self.renderModule(features=app_features, viewdirs=viewdirs[app_mask],
                                            temporal_indices=temporal_indices)
+            rgb[app_mask] = valid_rgbs
 
         # substitute of the above commented codes
         rgb[~point_dynamic_mask] = static_rgb.detach()[~point_dynamic_mask].unsqueeze(dim=1)
 
+        # acc_map = torch.sum(weight, dim=1)
+        # substitute of the above commented code
         acc_map = torch.zeros((xyz_sampled.shape[0], num_frames), device=xyz_sampled.device, dtype=(torch.float32))
         acc_map[ray_dynamic_mask] = torch.sum(weight[ray_dynamic_mask], dim=1)
         acc_map[~ray_dynamic_mask] = static_acc_map.detach()[~ray_dynamic_mask].unsqueeze(dim=-1)
 
+        # rgb_map = torch.sum(weight[..., None] * rgb, dim=1)
+        # substitute for the above commented code
         # rgb_map Nr T 3
         rgb_map = torch.zeros((xyz_sampled.shape[0], num_frames, 3), device=xyz_sampled.device, dtype=(torch.float32))
         rgb_map[ray_dynamic_mask] = torch.sum(weight[ray_dynamic_mask][..., None] * rgb[ray_dynamic_mask], dim=1)
@@ -597,6 +608,8 @@ class MixVoxels(torch.nn.Module):
             rgb_map = rgb_map + (1. - acc_map[..., None])
         rgb_map = rgb_map.clamp(0, 1)
         with torch.no_grad():
+            # depth_map = torch.sum(weight * z_vals.unsqueeze(dim=-1), dim=1)
+            # substitute of the above commented code
             depth_map = torch.zeros((xyz_sampled.shape[0], num_frames), device=xyz_sampled.device, dtype=(torch.float32))
             depth_map[ray_dynamic_mask] = torch.sum(weight[ray_dynamic_mask] * z_vals.unsqueeze(dim=-1), dim=1)
             depth_map = depth_map + (1. - acc_map) * rays_chunk[..., -1].unsqueeze(dim=-1)
