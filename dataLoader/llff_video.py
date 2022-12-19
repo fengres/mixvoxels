@@ -7,7 +7,7 @@ import os
 import cv2
 from PIL import Image
 from torchvision import transforms as T
-from utils import get_ray_weight, SimpleSampler
+from utils import get_ray_weight, SimpleSampler, mp
 import time
 from .ray_utils import *
 
@@ -390,10 +390,18 @@ class LLFFVideoDataset(Dataset):
             assert os.path.isdir(video_path)
             assert os.path.isfile(std_path)
             frames = [Image.open(os.path.join(video_path, image_id)).convert('RGB') for image_id in frames_paths]
+            # t1 = time.time()
+            # frames = mp(func=lambda x: Image.open(x).convert('RGB'),
+            #             parameters=[os.path.join(video_path, image_id) for image_id in frames_paths],
+            #             n_workers=8)
+            # t2 = time.time()
+            # print(t2-t1)
             if self.downsample != 1.0:
                 if list(frames[0].size) != list(self.img_wh):
                     frames = [img.resize(self.img_wh, Image.LANCZOS) for img in frames]
+
             frames = [self.transform(img) for img in frames]  # (T, 3, h, w)
+
             frames = [img.view(3, -1).permute(1, 0) for img in frames]  # (T, h*w, 3) RGB
             frames = torch.stack(frames, dim=1) # hw T 3
 

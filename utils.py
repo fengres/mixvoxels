@@ -7,6 +7,7 @@ import torch.nn.functional as F
 import scipy.signal
 import random
 import time
+from einops import rearrange
 
 mse2psnr = lambda x : -10. * torch.log(x) / torch.log(torch.Tensor([10.]))
 
@@ -212,15 +213,11 @@ class TVLossVoxel(nn.Module):
     def _tensor_size(self,t):
         return t.size()[0]*t.size()[1]*t.size()[2]*t.size()[3]
 
-def entropy_loss(sigma_ray_wise):
-    # sigma: Nr x ns x T
-    ns = sigma_ray_wise.shape[1]
-    if len(sigma_ray_wise.shape) == 3:
-        sigma = sigma_ray_wise.transpose(1, 2).reshape(-1, ns)
-    else:
-        sigma = sigma_ray_wise
-    sigma = torch.nn.functional.softmax(sigma, dim=-1)
-    ent = - (sigma * (sigma+1e-6).log()).sum(dim=1).mean()
+def entropy_loss(weights):
+    # weights: Nr x ns or Nr x ns x T
+    if len(weights.shape) == 3:
+        weights = rearrange(weights, 'r s t -> (r t) s')
+    ent = - (weights * (weights+1e-6).log()).sum(dim=1).mean()
     return ent
 
 def consistency_loss(input_diff, thresh=0.1, rgb=False):
@@ -598,4 +595,36 @@ class TicTok:
         self.tik()
         print(f'Time {s}: {self.interval}')
 
+from torch_efficient_distloss import eff_distloss, eff_distloss_native, flatten_eff_distloss
 
+def distortion_loss(dist, weights):
+    # dist: N_samples
+    # weights: N_rays N_samples or N_rays N_samples T
+    dist = dist.squeeze()
+    assert len(dist.shape) == 1
+    if dist.shape[0] < 2:
+        return 0.0
+    assert len(weights.shape) == 2 or len(weights.shape) == 3
+    if len(weights.shape) == 3:
+        weights = rearrange(weights, 'r s t -> (r t) s')
+    interval = dist[-1] - dist[-2]
+    dist = torch.cat([dist, torch.Tensor([dist[-1] + interval]).to(dist)], dim=0)
+    mid = (dist[1:] + dist[:-1])/2.
+    diff = torch.abs(mid[:, None] - mid[None, :])
+    loss_inter = ((diff[None, ...] * weights[:, None, :]).sum(dim=-1) * weights).sum(dim=-1)
+    loss_intra = ((dist[1:] - dist[:-1])[None, :] * (weights**2)).sum(dim=-1)/3.
+    loss = loss_inter + loss_intra
+    return loss.mean()
+
+from multiprocess import Pool
+def mp(func, parameters, n_workers=10):
+    pool = Pool(n_workers)
+    results = []
+    for i, p in enumerate(parameters):
+        results.append(pool.apply_async(func, args=(p,)))
+    pool.close()
+    pool.join()
+    returns = []
+    for i in results:
+        returns.append(i.get())
+    return returns

@@ -8,7 +8,6 @@ from functools import reduce
 from .timeHead import DirectDyRender, ForrierDyRender, MLPRender_Fea
 from .utils_model import sigma2alpha, raw2alpha, static_raw2alpha
 
-
 class AlphaGridMask(torch.nn.Module):
     def __init__(self, device, aabb, alpha_volume):
         super(AlphaGridMask, self).__init__()
@@ -287,7 +286,12 @@ class MixVoxels(torch.nn.Module):
 
     @torch.no_grad()
     def updateAlphaMask(self, gridSize=(200,200,200)):
-        alpha, dense_xyz = self.getDenseAlpha(gridSize)
+        # alpha, dense_xyz = self.getDenseAlpha(gridSize)
+        if self.args.alpha_dynamic:
+            alpha, dense_xyz = self.getTemporalDenseAlpha(gridSize)
+            alpha = alpha.max(dim=-1)[0]
+        else:
+            alpha, dense_xyz = self.getDenseAlpha(gridSize)
 
         # START INIT EQUAL VALUES
         delete_unoptimized = False
@@ -373,7 +377,7 @@ class MixVoxels(torch.nn.Module):
         dynamic_prediction = self.compute_dynamics(xyz_sampled) # -1
         dynamic_mask = torch.sigmoid(dynamic_prediction) > self.dynamic_threshold
 
-        sigma = torch.zeros((xyz_sampled.shape[0], self.n_frames), device=xyz_sampled.device, dtype=(torch.float16 if self.amp else torch.float32))
+        sigma = torch.zeros((xyz_sampled.shape[0], self.n_frames), device=xyz_sampled.device)
         ray_valid = alpha_mask & dynamic_mask
         if ray_valid.any():
             sigma_feature = self.compute_densityfeature(xyz_sampled[ray_valid])
@@ -423,7 +427,8 @@ class MixVoxels(torch.nn.Module):
         else:
             variance = variance_train.to(xyz_sampled)
 
-        dynamics_supervision = variance > self.temporal_variance_threshold
+        maxdiff = (rgb_train.max(dim=1)[0] - rgb_train.min(dim=1)[0]).mean(dim=1).to(xyz_sampled)
+        dynamics_supervision = (variance > self.temporal_variance_threshold) | (maxdiff > self.args.temporal_maxdiff_threshold)
 
         Nr, ns, nc = xyz_sampled.shape
         dynamic_prediction = self.compute_dynamics(xyz_sampled.reshape((Nr * ns, nc))).reshape(Nr, ns)
@@ -636,6 +641,11 @@ class MixVoxels(torch.nn.Module):
             'depth_map': depth_map,
             'static_rgb_map': static_rgb_map,
             'static_depth_map': static_depth_map,
+
+            # useful for distortion loss
+            'weight': weight,
+            'static_weight': static_weight,
+            'dist': z_vals,
         }
 
         if not is_train:

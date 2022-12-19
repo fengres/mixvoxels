@@ -81,11 +81,13 @@ def config_parser(cmd=None):
                         help='reset lr to inital after upsampling')
 
     # loss
+    parser.add_argument('--distortion_loss', type=float, default=0.)
     parser.add_argument('--gaussian', type=int, default=0)
     parser.add_argument('--dy_loss', type=str, default='l2', choices=['l2', 'l1'])
     parser.add_argument('--static_loss', type=str, default='l2', choices=['l2', 'l1'])
     parser.add_argument("--amp", type=int, default=1)
-    parser.add_argument("--temporal_variance_threshold", type=float, default=0.01)
+    parser.add_argument("--temporal_variance_threshold", type=float, default=0.03)
+    parser.add_argument("--temporal_maxdiff_threshold", type=float, default=1000000)
     parser.add_argument("--dynamic_threshold", type=float, default=0.9)
     parser.add_argument("--loss_weight_static", type=float, default=1)
     parser.add_argument("--dynamic_use_volumetric_render", type=int, default=0)
@@ -119,6 +121,7 @@ def config_parser(cmd=None):
     parser.add_argument("--rgb_diff_weight", type=float, default=0.0)
     parser.add_argument("--rgb_diff_log_thresh", type=float, default=0.02)
 
+    parser.add_argument("--alpha_dynamic", type=int, default=0)
     parser.add_argument("--n_frame_for_static", type=int, default=2)
     parser.add_argument("--L1_weight_inital", type=float, default=0.0,
                         help='loss weight')

@@ -443,10 +443,14 @@ def reconstruction(args):
             _time = time.time()
             timing['calc'] = _time - time_
 
+            if args.distortion_loss > 0:
+                # total_loss += args.distortion_loss * distortion_loss(retva.dist, retva.weight)
+                total_static_loss += args.distortion_loss * distortion_loss(retva.dist, retva.static_weight)
+
             if args.sigma_entropy_weight > 0:
-                total_loss += args.sigma_entropy_weight * entropy_loss(retva.sigma_ray_wise)
+                total_loss += args.sigma_entropy_weight * entropy_loss(retva.weight)
             if args.sigma_entropy_weight_static > 0:
-                total_static_loss += args.sigma_entropy_weight_static * entropy_loss(retva.static_sigma)
+                total_static_loss += args.sigma_entropy_weight_static * entropy_loss(retva.static_weight)
 
             if args.sigma_diff_weight > 0:
                 if args.sigma_diff_method == 'l2':
