@@ -51,6 +51,7 @@ rm_weight_mask_thre_static = 0.00001
 n_train_frames = 300
 n_frames = 300
 alpha_mask_thre = 0.000001
+alpha_dynamic = 1
 
 N_voxel_init = 2097152 # 256**3
 N_voxel_final = 262144000 # 640**3
