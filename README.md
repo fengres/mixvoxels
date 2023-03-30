@@ -5,6 +5,12 @@ Pytorch implementation for the paper: [Mixed Neural Voxels for Fast Multi-view V
 
 https://user-images.githubusercontent.com/43294876/204843741-0a2d10a8-f0b4-4f69-b262-7fc7983a20c5.mp4
 
+More complicated scenes with fast movements and large areas of motions.
+
+https://user-images.githubusercontent.com/43294876/228771137-ed67629f-e109-47cc-b0f1-50904435546d.mp4
+
+
+
 We present MixVoxels to better represent the dynamic scenes with fast training speed and competitive rendering qualities. 
 The proposed MixVoxels represents the 4D dynamic scenes as a mixture of static and dynamic voxels and processes them with different networks. 
 In this way, the computation of the required modalities for static voxels can be processed by a lightweight model, 
