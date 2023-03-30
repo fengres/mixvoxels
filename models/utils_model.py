@@ -34,3 +34,11 @@ def raw2alpha(sigma, dist):
 
     weights = alpha * T[:, :-1, :]  # [N_rays, N_samples, n_frame]
     return alpha, weights, T[:,-1:,:]
+
+def alpha2weights(alpha):
+    # sigma, dist  [N_rays, N_samples]
+
+    T = torch.cumprod(torch.cat([torch.ones(alpha.shape[0], 1).to(alpha.device), 1. - alpha + 1e-10], dim=1), dim=1)
+
+    weights = alpha * T[:, :-1]  # [N_rays, N_samples]
+    return weights

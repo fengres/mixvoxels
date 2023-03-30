@@ -41,7 +41,8 @@ class TensorVMSplit(MixVoxels):
                      ]
 
         grad_vars += [{'params': self.renderDenModule.parameters(), 'lr': lr_dynamic_basis}]
-        grad_vars += [{'params':self.renderModule.parameters(), 'lr':lr_dynamic_basis}]
+        grad_vars += [{'params': self.renderModule.parameters(), 'lr':lr_dynamic_basis}]
+        grad_vars += [{'params': self.time_delta, 'lr': lr_dynamic_basis*30}]
         return grad_vars
 
     def get_static_optparam_groups(self, lr_init_spatialxyz=0.02, lr_init_network=0.001):

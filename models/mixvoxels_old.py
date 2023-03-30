@@ -6,10 +6,10 @@ import numpy as np
 import time
 from functools import reduce
 from .timeHead import DirectDyRender, ForrierDyRender, MLPRender_Fea, AutoSyncDirectDyRender
-from .utils_model import sigma2alpha, raw2alpha, static_raw2alpha, alpha2weights
+from .utils_model import sigma2alpha, raw2alpha, static_raw2alpha
 
 class AlphaGridMask(torch.nn.Module):
-    def __init__(self, device, aabb, alpha_volume, alpha_values):
+    def __init__(self, device, aabb, alpha_volume):
         super(AlphaGridMask, self).__init__()
         self.device = device
 
@@ -17,21 +17,13 @@ class AlphaGridMask(torch.nn.Module):
         self.aabbSize = self.aabb[1] - self.aabb[0]
         self.invgridSize = 1.0/self.aabbSize * 2
         self.alpha_volume = alpha_volume.view(1,1,*alpha_volume.shape[-3:])
-        if alpha_values is not None:
-            self.alpha_values = alpha_values.view(1,1,*alpha_values.shape[-3:])
-        else:
-            self.alpha_values = None
         self.gridSize = torch.LongTensor([alpha_volume.shape[-1],alpha_volume.shape[-2],alpha_volume.shape[-3]]).to(self.device)
 
     def sample_alpha(self, xyz_sampled):
         xyz_sampled = self.normalize_coord(xyz_sampled)
         alpha_vals = F.grid_sample(self.alpha_volume, xyz_sampled.view(1,-1,1,1,3), align_corners=True).view(-1)
-        if self.alpha_values is not None:
-            real_alpha_vals = F.grid_sample(self.alpha_values, xyz_sampled.view(1,-1,1,1,3), align_corners=True).view(-1)
-        else:
-            real_alpha_vals = None
 
-        return alpha_vals, real_alpha_vals
+        return alpha_vals
 
     def normalize_coord(self, xyz_sampled):
         return (xyz_sampled-self.aabb[0]) * self.invgridSize - 1
@@ -217,8 +209,7 @@ class MixVoxels(torch.nn.Module):
         if 'alphaMask.aabb' in ckpt.keys():
             length = np.prod(ckpt['alphaMask.shape'])
             alpha_volume = torch.from_numpy(np.unpackbits(ckpt['alphaMask.mask'])[:length].reshape(ckpt['alphaMask.shape']))
-            # alpha_values = torch.from_numpy(ckpt['alphaMask.'][:length].reshape(ckpt['alphaMask.shape']))
-            self.alphaMask = AlphaGridMask(self.device, ckpt['alphaMask.aabb'].to(self.device), alpha_volume.float().to(self.device), None)
+            self.alphaMask = AlphaGridMask(self.device, ckpt['alphaMask.aabb'].to(self.device), alpha_volume.float().to(self.device))
         self.load_state_dict(ckpt['state_dict'])
 
     def sample_ray_ndc(self, rays_o, rays_d, is_train=True, N_samples=-1):
@@ -319,21 +310,19 @@ class MixVoxels(torch.nn.Module):
 
         ks = 3
         alpha = F.max_pool3d(alpha, kernel_size=ks, padding=ks // 2, stride=1).view(gridSize[::-1])
+        alpha[alpha>=self.alphaMask_thres] = 1
+        alpha[alpha<self.alphaMask_thres] = 0
 
-        binary_alpha = torch.zeros_like(alpha)
-        binary_alpha[alpha>=self.alphaMask_thres] = 1
-        binary_alpha[alpha<self.alphaMask_thres] = 0
+        self.alphaMask = AlphaGridMask(self.device, self.aabb, alpha)
 
-        self.alphaMask = AlphaGridMask(self.device, self.aabb, binary_alpha, alpha)
-
-        valid_xyz = dense_xyz[binary_alpha>0.5]
+        valid_xyz = dense_xyz[alpha>0.5]
 
         xyz_min = valid_xyz.amin(0)
         xyz_max = valid_xyz.amax(0)
 
         new_aabb = torch.stack((xyz_min, xyz_max))
 
-        total = torch.sum(binary_alpha)
+        total = torch.sum(alpha)
         print(f"bbox: {xyz_min, xyz_max} alpha rest %%%f"%(total/total_voxels*100))
         return new_aabb
 
@@ -360,7 +349,7 @@ class MixVoxels(torch.nn.Module):
 
             else:
                 xyz_sampled, _,_ = self.sample_ray(rays_o, rays_d, N_samples=N_samples, is_train=False)
-                mask_inbbox= (self.alphaMask.sample_alpha(xyz_sampled)[0].view(xyz_sampled.shape[:-1]) > 0).any(-1)
+                mask_inbbox= (self.alphaMask.sample_alpha(xyz_sampled).view(xyz_sampled.shape[:-1]) > 0).any(-1)
 
             mask_filtered.append(mask_inbbox.cpu())
 
@@ -380,7 +369,7 @@ class MixVoxels(torch.nn.Module):
 
     def compute_temporal_alpha(self, xyz_locs, length=1):
         if self.alphaMask is not None:
-            alphas, _ = self.alphaMask.sample_alpha(xyz_locs)
+            alphas = self.alphaMask.sample_alpha(xyz_locs)
             alpha_mask = alphas > 0
         else:
             alpha_mask = torch.ones_like(xyz_locs[:, 0], dtype=bool)
@@ -413,7 +402,7 @@ class MixVoxels(torch.nn.Module):
 
     def compute_mean_alpha(self, xyz_locs, length=1, return_density=False):
         if self.alphaMask is not None:
-            alphas, _ = self.alphaMask.sample_alpha(xyz_locs)
+            alphas = self.alphaMask.sample_alpha(xyz_locs)
             alpha_mask = alphas > 0
         else:
             alpha_mask = torch.ones_like(xyz_locs[:,0], dtype=bool)
@@ -500,24 +489,11 @@ class MixVoxels(torch.nn.Module):
         viewdirs = viewdirs.view(-1, 1, 3).expand(xyz_sampled.shape)
 
         if alpha_filte and self.alphaMask is not None:
-            alphas, _real_alphas = self.alphaMask.sample_alpha(xyz_sampled[ray_valid])
-            origin_ray_valid = ray_valid
+            alphas = self.alphaMask.sample_alpha(xyz_sampled[ray_valid])
             alpha_mask = alphas > 0
-
             ray_invalid = ~ray_valid
             ray_invalid[ray_valid] |= (~alpha_mask)
             ray_valid = ~ray_invalid
-
-            # eary stop
-            if self.args.early_stop > 0:
-                real_alphas = torch.zeros_like(xyz_sampled[...,0], dtype=_real_alphas.dtype)
-                real_alphas[origin_ray_valid] = _real_alphas
-                transmittence = alpha2weights(real_alphas) 
-                previous_valid_num = ray_valid.sum()
-                ray_valid = ray_valid & (transmittence > self.args.early_stop)
-                post_valid_num = ray_valid.sum()
-                print("early stop ratio: {:.4f}".format(post_valid_num/previous_valid_num))
-
 
         return xyz_sampled, z_vals, ray_valid, dists, viewdirs
 
@@ -566,7 +542,7 @@ class MixVoxels(torch.nn.Module):
         xyz_sampled, z_vals, ray_valid, dists, viewdirs = self.sampling_points(rays_chunk, ndc_ray, is_train, N_samples)
         xyz_sampled = self.normalize_coord(xyz_sampled)
         # cams_train Nr point_wise_cams Nr x Ns
-        #point_wise_cams = cams_train.unsqueeze(dim=-1).expand(-1, xyz_sampled.shape[1])
+        point_wise_cams = cams_train.unsqueeze(dim=-1).expand(-1, xyz_sampled.shape[1])
 
         # Inference the dynamic points
         num_frames = self.n_frames if temporal_indices is None else self.n_train_frames
@@ -588,7 +564,7 @@ class MixVoxels(torch.nn.Module):
             sigma_feature = self.compute_densityfeature(xyz_sampled[ray_valid])
             assert temporal_indices is None or len(temporal_indices.shape) == 1, 'wrong temporal indices'
             sigma_feature = self.renderDenModule(features=sigma_feature, temporal_indices=temporal_indices,
-                                                 cams=None)
+                                                 cams=point_wise_cams[ray_valid], time_delta=self.time_delta)
             validsigma = self.feature2density(sigma_feature)
             sigma[ray_valid] = validsigma
             if self.zero_dynamic_sigma:
@@ -621,7 +597,8 @@ class MixVoxels(torch.nn.Module):
         if app_mask.any():
             app_features = self.compute_appfeature(xyz_sampled[app_mask])
             valid_rgbs = self.renderModule(features=app_features, viewdirs=viewdirs[app_mask],
-                                           temporal_indices=temporal_indices, cams=None)
+                                           temporal_indices=temporal_indices, cams=point_wise_cams[app_mask],
+                                           time_delta=self.time_delta)
             rgb[app_mask] = valid_rgbs
 
         # substitute of the above commented codes

@@ -3,6 +3,7 @@ import torch.nn
 import math
 import numpy as np
 from .utils_model import positional_encoding
+from einops import rearrange
 
 
 class MLPRender_Fea(torch.nn.Module):
@@ -72,7 +73,7 @@ class DirectDyRender(torch.nn.Module):
 
         self.mlp = torch.nn.Sequential(*layers)
 
-    def forward(self, features, time=None, viewdirs=None, temporal_indices=None):
+    def forward(self, features, time=None, viewdirs=None, temporal_indices=None, cams=None):
         # spatio_temporal_sigma_mask: for rgb branch prunning
         # temporal_mask is for re-sampling temporal sequence by variance of training pixels.
         Ns = features.shape[0]
@@ -172,3 +173,106 @@ class ForrierDyRender(torch.nn.Module):
 
         output = output.squeeze(dim=-1)
         return output, 0# frequency_output.squeeze(dim=-1)
+
+class AutoSyncDirectDyRender(torch.nn.Module):
+    def __init__(self, inChanel, viewpe=6, using_view=False, n_time_embedding=6,
+                 total_time=300, featureD=128, time_embedding_type='abs', net_spec='i-d-d-o', gain=1.0,
+                 n_cameras=None):
+        super(AutoSyncDirectDyRender, self).__init__()
+
+        self.in_mlpC = inChanel + using_view * (3 + 2*viewpe*3)
+        self.viewpe = viewpe
+        self.n_time_embedding = n_time_embedding
+        self.time_embedding_type = time_embedding_type
+        self.using_view = using_view
+        self.total_time = total_time
+        self.forward_time = 0
+
+        self.out_dim = 3*total_time if using_view else total_time
+        self.gain = gain
+        layers = []
+        _net_spec = net_spec.split('-')
+        for i_mk, mk in enumerate(_net_spec):
+            if mk == 'i':
+                continue
+            if mk == 'd' and _net_spec[i_mk-1] == 'i':
+                layer = torch.nn.Linear(self.in_mlpC, featureD)
+            if mk == 'd' and _net_spec[i_mk-1] == 'd':
+                layer = torch.nn.Linear(featureD, featureD)
+            if mk == 'o' and _net_spec[i_mk-1] == 'i':
+                layer = torch.nn.Linear(self.in_mlpC, self.out_dim)
+            if mk == 'o' and _net_spec[i_mk-1] == 'd':
+                layer = None
+                continue
+                # layer = torch.nn.Linear(featureD, self.out_dim)
+            torch.nn.init.constant_(layer.bias, 0)
+            # torch.nn.init.xavier_uniform_(layer.weight, gain=(0.5 if not using_view else 1))
+            torch.nn.init.xavier_uniform_(layer.weight, gain=(self.gain if not using_view else 1))
+            # torch.nn.init.kaiming_normal_(layer.weight, nonlinearity='relu')
+
+            layers.append(layer)
+            if mk != 'o':
+                layers.append(torch.nn.ReLU(inplace=True))
+
+        self.mlp = torch.nn.Sequential(*layers)
+
+        dt, fd = 8, featureD
+        self.dt = dt
+        self.Q = torch.nn.parameter.Parameter(torch.randn(dt, (3 if using_view else 1) * fd))
+
+        # self.n_cameras = n_cameras or 30
+        # self.time_delta = torch.nn.parameter.Parameter(10*torch.randn(self.n_cameras))
+
+    def get_time_embedding_per_cameras(self, time_delta):
+        '''
+            get time embedding for each camera
+        '''
+        normal_queries = torch.arange(0, self.total_time, dtype=torch.float).cuda()
+        camera_wise_queries = normal_queries.unsqueeze(dim=0) + time_delta.unsqueeze(dim=1)
+        return positional_encoding(camera_wise_queries.unsqueeze(dim=-1), freqs=self.dt//2)
+
+    def get_time_queries(self, camera_indices, time_delta):
+        # time_embedding_per_cameras: C x T x dt
+        time_embedding_per_cameras = self.get_time_embedding_per_cameras(time_delta)
+        # time_embedding_per_points: Ns x T x dt
+        time_embedding_per_points = time_embedding_per_cameras[camera_indices]
+
+        mat1 = self.Q.unsqueeze(dim=0).unsqueeze(dim=0)   # 1  1 dt (k x fd)
+        mat2 = time_embedding_per_points.unsqueeze(dim=-2)# Ns T 1  dt
+        time_queries = torch.einsum('btij,btjk->btik', mat2, mat1).squeeze() # Ns T (k x fd)
+        return time_queries
+
+    def forward(self, features, viewdirs=None, temporal_indices=None, cams=None, time_delta=None):
+        # spatio_temporal_sigma_mask: for rgb branch prunning
+        # temporal_mask is for re-sampling temporal sequence by variance of training pixels.
+        # cams: [Ns]
+        Ns = features.shape[0]
+        if self.forward_time < 1000:
+            time_delta = torch.zeros(30).cuda()
+        time_delta = torch.cat([torch.Tensor([0,]).cuda(), time_delta[1:]], dim=0)
+        # time_delta[0] = 0.
+        time_queries = self.get_time_queries(cams, time_delta) # Ns T (k x fd)
+        print(time_delta)
+        time_queries = rearrange(time_queries, 'n t (k f) -> n t k f', k=(3 if self.using_view else 1))
+        num_frames = self.total_time
+        indata = [features, ]
+        if self.using_view:
+            indata += [viewdirs,]
+            indata += [positional_encoding(viewdirs, self.viewpe),]
+        mlp_in = torch.cat(indata, dim=-1)
+        output = self.mlp(mlp_in) # Ns fd
+        output = output.unsqueeze(dim=1).unsqueeze(dim=1) # Ns 1 1 fd
+        output = torch.einsum('ntkf,ntkf->ntk', time_queries, output)
+
+        if temporal_indices is not None and len(temporal_indices.shape) == 1:
+            output = output.reshape(Ns, self.total_time, -1)
+            output = output[:, temporal_indices, :]
+        else:
+            output = output.reshape(Ns, num_frames, -1)
+
+        if self.using_view:
+            output = torch.sigmoid(output)
+
+        output = output.squeeze(dim=-1)
+        self.forward_time += 1
+        return output
