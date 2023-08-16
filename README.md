@@ -1,4 +1,4 @@
-# MixVoxels: Mixed Neural Voxels for Fast Multi-view Video Synthesis
+# [ICCV2023 Oral] MixVoxels: Mixed Neural Voxels for Fast Multi-view Video Synthesis
 ### [Project Page](https://fengres.github.io/mixvoxels/)  |  [Paper](https://arxiv.org/pdf/2212.00190.pdf)
 
 Pytorch implementation for the paper: [Mixed Neural Voxels for Fast Multi-view Video Synthesis](https://arxiv.org/pdf/2212.00190.pdf). 
